@@ -51,6 +51,7 @@ def main():
     regressor_all = []
     tau_mes_link7_all = []
     regressor_link7_all = []
+    regressor_1to6_all = []
 
     # Data collection loop
     while current_time < max_time:
@@ -86,46 +87,80 @@ def main():
         # TODO Compute regressor and store it
         regressor = dyn_model.ComputeDynamicRegressor(q_mes,qd_mes,qdd_mes)
         #print("regessor",regressor.shape)
-
+        regressor_for_1to6 = regressor[:, :60]#(7,60)
+        regressor_for_7 = regressor[:, 60:] #(7,10)
+        regressor_all.append(regressor)
+        regressor_1to6_all.append(regressor_for_1to6)
+        regressor_link7_all.append(regressor_for_7)
+        
+        tau_mes_all.append(tau_mes)
+        tau_mes_link7_all.append(tau_mes[6])
         current_time += time_step
         # Optional: print current time
         print(f"Current time in seconds: {current_time:.2f}")
 
     # TODO After data collection, stack all the regressor and all the torque and compute the parameters 'a'  using pseudoinverse for all the joint
-        if len(regressor_all)==0:
-            regressor_all = regressor
-            regressor_link7_all = regressor[6,-10:].reshape(1,10)
-            print("regressor_link7",regressor_link7_all.shape)
-        else:
-            regressor_all=np.vstack((regressor_all,regressor))
-            regressor_link7_all=np.vstack((regressor_link7_all,regressor[6,-10:].reshape(1,10)))
-            print("regressor_link7",regressor_link7_all.shape)
-        if len(tau_mes_all)==0:
-            tau_mes_all = tau_mes.reshape(7,1)
-            tau_mes_link7_all = tau_mes[6].reshape(1,1)
-            print("tau_mes_all-0",tau_mes_all.shape)
-        else:
-            tau_mes_all=np.vstack((tau_mes_all,tau_mes.reshape(7,1)))
-            tau_mes_link7_all=np.vstack((tau_mes_link7_all,tau_mes[6].reshape(1,1)))
-
-    print("regressor_all",regressor_all.shape)
-    print("tau_mes_all",tau_mes_all.shape)
-    print("regressor_link7_all",regressor_link7_all.shape)
+        
+        # if len(regressor_all)==0:
+        #     regressor_all = regressor
+        #     regressor_link7_all = regressor_for_7
+        #     regressor_1to6_all = regressor_for_1to6
+        #     print("regressor_link7",regressor_link7_all.shape)
+        # else:
+        #     regressor_all=np.vstack((regressor_all,regressor))
+        #     regressor_link7_all=np.vstack((regressor_link7_all,regressor_for_7))
+        #     regressor_1to6_all=np.vstack((regressor_1to6_all,regressor_for_1to6))
+        #     print("regressor_link7",regressor_link7_all.shape)
+        # if len(tau_mes_all)==0:
+        #     tau_mes_all = tau_mes.reshape(7,1)
+        #     #tau_mes_link7_all = tau_mes[6].reshape(1,1)
+        #     print("tau_mes_all-0",tau_mes_all.shape)
+        # else:
+        #     tau_mes_all=np.vstack((tau_mes_all,tau_mes.reshape(7,1)))
+        #     #tau_mes_link7_all=np.vstack((tau_mes_link7_all,tau_mes[6].reshape(1,1)))
+    # give up data in the first second for regression
+    regressor_stack = np.vstack(regressor_all[1000:])
+    regressor_1to6_stack  = np.vstack(regressor_1to6_all[1000:])
+    regressor_link7_stack = np.vstack(regressor_link7_all[1000:])
+    tau_mes_stack = np.array(tau_mes_all[1000:]).reshape(-1,1)
+    tau_mes_link7_all = np.array(tau_mes_link7_all).reshape(-1,1)
+    # remain all data for evaluation
+    regressor_all = np.vstack(regressor_all)
+    regressor_1to6_all  = np.vstack(regressor_1to6_all)
+    regressor_link7_all = np.vstack(regressor_link7_all)
+    tau_mes_all = np.array(tau_mes_all).reshape(-1,1)
+    print("regressor_stack",regressor_stack.shape)
+    print("tau_mes_stack",tau_mes_stack.shape)
+    print("regressor_link7_stack",regressor_link7_stack.shape)
+    print("regressor_1to6_stack ",regressor_1to6_stack.shape)
     print("tau_mes_link7_all",tau_mes_link7_all.shape)
 
-    a = np.linalg.pinv(regressor_all)@tau_mes_all
-    print("pseudoinverse calculated a", a.shape,a.reshape(7,10))
+    a_pred = np.linalg.pinv(regressor_stack)@tau_mes_stack
+    print("pseudoinverse calculated a", a_pred.shape,a_pred.reshape(7,10))
     # TODO reshape the regressor and the torque vector to isolate the last joint and find the its dynamical parameters
-    a_link7 = np.linalg.pinv(regressor_link7_all)@tau_mes_link7_all
-    print("pseudoinverse calculated a_link7", a_link7)
+    params = []
+    for i in range(num_joints):
+        params.append(np.asarray(dyn_model.pin_model.inertias[i+1].toDynamicParameters(), dtype=float).flatten())
+    params = np.asarray(params).flatten()
+    print("a true",params)
+    a_params_1to6 = params[:10 * (num_joints - 1)].reshape(60,1)
+    #τ=Y1−6​a1−6​+Y7​a7​
+    a_link7 = np.linalg.pinv(regressor_link7_stack) @ (tau_mes_stack - (regressor_1to6_stack  @ a_params_1to6))
+    #a_link7 = np.linalg.pinv(regressor_link7_all)@tau_mes_link7_all
+    print("pseudoinverse calculated a_link7", a_link7.shape, a_link7)
     
     # TODO compute the metrics (R-squared adjusted etc...) for the linear model on a different file     
-    tau_mes_link7_pred = regressor_link7_all@a_link7
-    tau_mes_all_pred = regressor_all@a
+    tau_mes_link7_pred = (regressor_1to6_all @ a_params_1to6) + (regressor_link7_all@a_link7)
+    tau_mes_link7_pred = tau_mes_link7_pred[6::7]
+    print("tau_mes_link7_pred",tau_mes_link7_pred.shape,tau_mes_link7_pred)
+    # print("tau_mes",np.array(tau_mes_all).shape,tau_mes_all)
+    tau_mes_all_pred = regressor_all@a_pred
+    # Extract actual dynamic a parameters from the urdf file
+    
 
     # save data
     np.savez('./week_1_2/robot_data.npz', Y_link7=regressor_link7_all, Y=regressor_all, 
-            a_link7=a_link7,a=a,
+            a_link7=a_link7,a_pred=a_pred, a_true=params,
             u_link7=tau_mes_link7_all,u_link7_pred=tau_mes_link7_pred,u=tau_mes_all,u_pred=tau_mes_all_pred)
     # TODO plot the torque prediction error for each joint (optional)
     
