@@ -135,7 +135,8 @@ def main():
     print("regressor_1to6_stack ",regressor_1to6_stack.shape)
     print("tau_mes_link7_all",tau_mes_link7_all.shape)
 
-    a_pred = np.linalg.pinv(regressor_stack)@tau_mes_stack
+    #a_pred = np.linalg.pinv(regressor_stack)@tau_mes_stack
+    a_pred = np.linalg.pinv(regressor_all)@tau_mes_all
     print("pseudoinverse calculated a", a_pred.shape,a_pred.reshape(7,10))
     # TODO reshape the regressor and the torque vector to isolate the last joint and find the its dynamical parameters
     params = []
