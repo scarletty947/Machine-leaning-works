@@ -147,6 +147,7 @@ def main():
     a_params_1to6 = params[:10 * (num_joints - 1)].reshape(60,1)
     #τ=Y1−6​a1−6​+Y7​a7​
     a_link7 = np.linalg.pinv(regressor_link7_stack) @ (tau_mes_stack - (regressor_1to6_stack  @ a_params_1to6))
+    #a_link7 = np.linalg.pinv(regressor_link7_all) @ (tau_mes_all - (regressor_1to6_all  @ a_params_1to6))
     #a_link7 = np.linalg.pinv(regressor_link7_all)@tau_mes_link7_all
     print("pseudoinverse calculated a_link7", a_link7.shape, a_link7)
     
